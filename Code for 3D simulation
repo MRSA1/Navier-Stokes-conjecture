@@ -1,0 +1,83 @@
+import asyncio
+import platform
+import numpy as np
+import pygame
+from pygame import surfarray
+
+FPS = 60
+N = 50
+dx = 1.0
+nu = 0.01
+dt = 0.005
+Lx, Ly, Lz, Lh = 1.0, 1.0, 1.0, 1.0
+omega_ref = 1.0
+
+async def main():
+    pygame.init()
+    screen = pygame.display.set_mode((800, 600))
+    clock = pygame.time.Clock()
+
+    # Initialize 3D random velocity field
+    u_x = np.random.rand(N, N, N) - 0.5
+    u_y = np.random.rand(N, N, N) - 0.5
+    u_z = np.random.rand(N, N, N) - 0.5
+    omega = np.zeros((N, N, N, 3))
+
+    # Compute initial vorticity
+    for i in range(1, N-1):
+        for j in range(1, N-1):
+            for k in range(1, N-1):
+                omega[i, j, k, 0] = (u_z[i, j, k+1] - u_z[i, j, k-1]) / (2 * dx) - (u_y[i, j+1, k] - u_y[i, j-1, k]) / (2 * dx)
+                omega[i, j, k, 1] = (u_x[i, j+1, k] - u_x[i, j-1, k]) / (2 * dx) - (u_z[i+1, j, k] - u_z[i-1, j, k]) / (2 * dx)
+                omega[i, j, k, 2] = (u_y[i+1, j, k] - u_y[i-1, j, k]) / (2 * dx) - (u_x[i, j, k+1] - u_x[i, j, k-1]) / (2 * dx)
+
+    a0 = Lx * np.max(np.abs(np.gradient(u_x, dx)))
+    b0 = Ly * np.max(np.abs(np.gradient(u_y, dx)))
+    c0 = Lz * np.sqrt(np.sum(omega[:, :, :, 0]**2 + omega[:, :, :, 1]**2 + omega[:, :, :, 2]**2)) / omega_ref
+    h0 = Lh * np.sqrt(np.sum(np.gradient(u_x, dx)**2 + np.gradient(u_y, dx)**2 + np.gradient(u_z, dx)**2)) / np.max(np.abs(np.gradient(u_x, dx)))
+
+    t = 0.0
+    while t < 10.0:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return
+
+        alpha = 1 + t * np.max(np.abs(np.gradient(u_x, dx)))
+        beta = 1 + t * np.max(np.abs(np.gradient(u_y, dx)))
+        gamma = np.sqrt(np.sum(omega[:, :, :, 0]**2 + omega[:, :, :, 1]**2 + omega[:, :, :, 2]**2)) / np.sqrt(np.sum(omega[0, 0, :, 0]**2 + omega[0, 0, :, 1]**2 + omega[0, 0, :, 2]**2))
+        eta = np.sqrt(np.sum(np.gradient(u_x, dx)**2 + np.gradient(u_y, dx)**2 + np.gradient(u_z, dx)**2)) / np.sqrt(np.sum(np.gradient(u_x[0], dx)**2 + np.gradient(u_y[0], dx)**2 + np.gradient(u_z[0], dx)**2))
+
+        a = a0 * alpha
+        b = b0 * beta
+        c = c0 * gamma
+        h = h0 * eta
+
+        A = 0.5 * a * (a + b) * h
+        B = 0.5 * b * (a + b) * h
+        C = 0.5 * c**2 * h
+        D = (a + b) * h * c
+
+        # 3D Navier-Stokes update (simplified vorticity diffusion)
+        omega_new = omega.copy()
+        for i in range(1, N-1):
+            for j in range(1, N-1):
+                for k in range(1, N-1):
+                    for d in range(3):
+                        laplacian = (omega[i+1, j, k, d] + omega[i-1, j, k, d] + omega[i, j+1, k, d] + omega[i, j-1, k, d] + omega[i, j, k+1, d] + omega[i, j, k-1, d] - 6 * omega[i, j, k, d]) / dx**2
+                        omega_new[i, j, k, d] += dt * nu * laplacian
+        omega = omega_new
+
+        # Visualize 2D slice of 3D vorticity (e.g., omega_z at k=N//2)
+        omega_slice = omega[:, :, N//2, 2]
+        surf = pygame.surfarray.make_surface((omega_slice + 1) * 128)
+        screen.blit(pygame.transform.scale(surf, (800, 600)), (0, 0))
+        pygame.display.flip()
+
+        t += dt
+        await asyncio.sleep(1.0 / FPS)
+
+if platform.system() == "Emscripten":
+    asyncio.ensure_future(main())
+else:
+    if __name__ == "__main__":
+        asyncio.run(main())
