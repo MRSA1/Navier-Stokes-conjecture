@@ -1,0 +1,77 @@
+import asyncio
+import platform
+import numpy as np
+import pygame
+from pygame import surfarray
+
+FPS = 60
+N = 100
+dx = 1.0
+nu = 0.01  # Viscosity
+dt = 0.01  # Time step
+Lx, Ly, Lz, Lh = 1.0, 1.0, 1.0, 1.0  # Reference lengths
+omega_ref = 1.0
+
+async def main():
+    pygame.init()
+    screen = pygame.display.set_mode((800, 600))
+    clock = pygame.time.Clock()
+
+    # Initialize random velocity field
+    u = np.random.rand(N, N) - 0.5  # Initial u_x
+    v = np.random.rand(N, N) - 0.5  # Initial u_y
+    omega = np.zeros((N, N))
+
+    # Compute initial vorticity
+    for i in range(1, N-1):
+        for j in range(1, N-1):
+            omega[i, j] = (v[i, j+1] - v[i, j-1]) / (2 * dx) - (u[i+1, j] - u[i-1, j]) / (2 * dx)
+
+    a0 = Lx * np.max(np.abs(np.gradient(u, dx)))
+    b0 = Ly * np.max(np.abs(np.gradient(v, dx)))
+    c0 = Lz * np.sqrt(np.sum(omega**2)) / omega_ref
+    h0 = Lh * np.sqrt(np.sum(np.gradient(u, dx)**2 + np.gradient(v, dx)**2)) / np.max(np.abs(np.gradient(u, dx)))
+
+    t = 0.0
+    while t < 10.0:  # Finite time simulation
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return
+
+        # Update scaling factors
+        alpha = 1 + t * np.max(np.abs(np.gradient(u, dx)))
+        beta = 1 + t * np.max(np.abs(np.gradient(v, dx)))
+        gamma = np.sqrt(np.sum(omega**2)) / np.sqrt(np.sum(omega[0]**2))
+        eta = np.sqrt(np.sum(np.gradient(u, dx)**2 + np.gradient(v, dx)**2)) / np.sqrt(np.sum(np.gradient(u[0], dx)**2 + np.gradient(v[0], dx)**2))
+
+        a = a0 * alpha
+        b = b0 * beta
+        c = c0 * gamma
+        h = h0 * eta
+
+        A = 0.5 * a * (a + b) * h
+        B = 0.5 * b * (a + b) * h
+        C = 0.5 * c**2 * h
+        D = (a + b) * h * c
+
+        # Simplified Navier-Stokes update (vorticity form)
+        omega_new = omega.copy()
+        for i in range(1, N-1):
+            for j in range(1, N-1):
+                domega_dt = nu * (omega[i+1, j] + omega[i-1, j] + omega[i, j+1] + omega[i, j-1] - 4 * omega[i, j]) / dx**2
+                omega_new[i, j] += dt * domega_dt
+        omega = omega_new
+
+        # Visualize
+        surf = pygame.surfarray.make_surface((omega + 1) * 128)  # Scale for display
+        screen.blit(pygame.transform.scale(surf, (800, 600)), (0, 0))
+        pygame.display.flip()
+
+        t += dt
+        await asyncio.sleep(1.0 / FPS)
+
+if platform.system() == "Emscripten":
+    asyncio.ensure_future(main())
+else:
+    if __name__ == "__main__":
+        asyncio.run(main())
